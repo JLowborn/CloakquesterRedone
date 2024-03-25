@@ -2,9 +2,8 @@ import os
 import re
 import sys
 
-from core import cloakquester
-from core import color_print as cp
-from core import print_banner
+from core import cloakquester, parser, print_banner
+from core.utils import *
 
 
 def is_valid_file(arg):
@@ -20,8 +19,8 @@ def is_valid_url(arg):
     """
     Check if the given URL is valid.
     """
-    # Regular expression pattern for validating URL
-    pattern = "^https:\/\/[0-9A-z.]+.[0-9A-z.]+.[a-z]+$"
+    # Regular expression pattern for validating domain or URL
+    pattern = r"^(https?://[\w.-]+\.[a-zA-Z]{2,}(?:/\S*)?|[\w.-]+\.[a-zA-Z]{2,})$"
 
     if not re.match(pattern, arg):
         parser.error(f'The URL "{arg}" is not valid.')
@@ -29,44 +28,42 @@ def is_valid_url(arg):
     return cloakquester._to_hostname(arg)
 
 def main():
-    print("[!] Checking if website uses Cloudflare")
+    print(f"\n{G}[-] {C}Checking if the website uses Cloudflare...{W}\n")
     ip_addr = cloakquester.get_addr(hostname)
     server_name = cloakquester.detect_web_server(hostname)
 
     if server_name != "cloudflare" and not args.force:
-        op = input(f"[-] Website is using {server_name.capitalize()}. Proceed? (Y/N) ")
+        print(f"\n{G}[+] {C}Website is using: {G} {server_name}")
+        op = input(f"\n{Y}> Do you want to proceed? {G}(y/N): ")
 
         if not re.match(r"^(?:yes|y)$", op, re.IGNORECASE):
-            cp(f"[!] Operation aborted, exiting...", "red")
+            print(f"{R}[!] Operation aborted. Exiting...{W}")
             sys.exit(0)
 
-    cp(f"[+] Target Website: {hostname}", "cyan")
-    cp(f"[+] Visible IP: {ip_addr}", "cyan")
-    cp(f"[+] Website is using: {server_name}", "cyan")
+    print(f"\n{R}Target Website: {W}{hostname}")
+    print(f"{R}Visible IP Address: {W}{ip_addr}\n")
+    print(f"{R}Website is using: {W}{server_name}")
 
-    cloakquester.viewdns_ip_history(hostname)
+    cloakquester.get_viewdns_ip_history(hostname)
 
     if not args.st_scan:
-        cloakquester.securitytrails_ip_history(hostname)
+        cloakquester.get_securitytrails_ip_history(hostname)
 
     if not args.no_bruteforce:
-        cp(f"\n[+] Scanning for subdomains...", "green")
+        print(f"\n{G}[+] {Y}Scanning for subdomains...{W}")
         cloakquester.ssl_analysis(hostname, wordlist)
 
 
 if __name__ == '__main__':
-    import argparse
+    from core import parser
 
-    # CLI Arguments
-    parser = argparse.ArgumentParser(
+    parser = parser.ArgumentParser(
         description="Uncover the true IP addresses Cloudflare safeguarded websites.",
         prog="cloakquest3r", 
-        epilog="Created by Spyboy."
+        epilog="Created by Spyboy.",
     )
     parser.add_argument(
-        "-u", "--url",
-        dest="url", 
-        required=True, 
+        "url",
         help="set target URL", 
         metavar="URL", 
         type=is_valid_url
@@ -84,14 +81,13 @@ if __name__ == '__main__':
     parser.add_argument("--no-security-trails", dest="st_scan", required=False, action="store_true", help="disable Security Trails IP history verify (optional)")
     parser.add_argument("--no-bruteforce", dest="no_bruteforce", required=False, action="store_true", help="disable scanning for subdomains (optional)")
     parser.add_argument("--no-banner", dest="no_banner", required=False, action="store_true", help="hide banner during execution (optional)")
+
     args = parser.parse_args()
 
     hostname = args.url
     wordlist = args.wordlist
 
-    print(wordlist)
-
     if not args.no_banner:
-        cp(print_banner(), "green")
+        print_banner()
 
     main()

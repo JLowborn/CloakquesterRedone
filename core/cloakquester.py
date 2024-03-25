@@ -1,26 +1,25 @@
-import os
 import socket
 import ssl
 import threading
 
 import requests
-import toml
 from bs4 import BeautifulSoup as bs
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 
-from .color import color_print as cp
+from . import config
+from .utils import *
 
 
-def _to_hostname(url: str = None) -> str:
+def _to_hostname(url: str) -> str:
     hostname = url.replace("https://", "")
     hostname = hostname.replace("http://", "")
     return hostname
 
-def _to_url(hostname: str = None) -> str:
+def _to_url(hostname: str) -> str:
     return f"https://{hostname}"
 
-def get_addr(hostname: str = None) -> str|None:
+def get_addr(hostname: str) -> str|None:
     '''
     Retrieve IP address based on the given hostname.
 
@@ -34,8 +33,8 @@ def get_addr(hostname: str = None) -> str|None:
         return socket.gethostbyname(hostname)
     except:
         return
-    
-def detect_web_server(hostname: str = None) -> str:
+   
+def detect_web_server(hostname: str) -> str:
     '''
     Detect the web server used by a given hostname.
 
@@ -46,16 +45,16 @@ def detect_web_server(hostname: str = None) -> str:
         str: The name of the web server detected from the response headers, or "Unknown" if the detection fails.
     '''
     try:
-        response = requests.head(_to_url(hostname))
+        response = requests.head(_to_url(hostname), timeout=5)
 
         if "CF-RAY" in response.headers:
             return "cloudflare"
         
         return response.headers["Server"]
-    except:
+    except KeyError:
         return "unknown"
 
-def get_certificate_info(hostname: str = None) -> dict|None:
+def get_certificate_info(hostname: str) -> dict|None:
     try:
         with socket.create_connection((hostname, 443)) as sock:
             with ssl.create_default_context().wrap_socket(sock, server_hostname=hostname) as secure_sock:
@@ -68,19 +67,19 @@ def get_certificate_info(hostname: str = None) -> dict|None:
             "Validity End": certificate.not_valid_after_utc,
         }
     except Exception as e:
-        cp(f"Error extracting SSL certificate information: {e}", "red")
+        print(f"Error extracting SSL certificate information: {e}")
         return None
 
-def ssl_analysis(hostname: str = None, filename: str = None):
+def ssl_analysis(hostname: str, filename: str):
     subdomains_found = []
 
-    def check_subdomain(subdomain: str = None) -> None:
+    def check_subdomain(subdomain: str) -> None:
         subdomain_url = _to_url(f"{subdomain}.{hostname}")
         try:
-            response = requests.get(subdomain_url, timeout=20)
+            response = requests.get(subdomain_url, timeout=5)
             if response.status_code == 200:
                 subdomains_found.append(subdomain_url)
-                cp(f"[+] Subdomain Found: {subdomain_url}", "green")
+                print(f" {G}\u2514\u27A4 {subdomain_url}{W}")
         except:
             pass
 
@@ -96,28 +95,28 @@ def ssl_analysis(hostname: str = None, filename: str = None):
     for thread in threads:
         thread.join()
 
-    cp(f"\n[*] Total subdomains scanned: {len(subdomains)}", "green")
-    cp(f"[*] Total subdomains found: {len(subdomains_found)}\n", "green")
+    print(f"\n{G} [+] {C}Total Subdomains Scanned:{W} {len(subdomains)}")
+    print(f"{G} [+] {C}Total Subdomains Found:{W} {len(subdomains_found)}")
 
     for subdomain in subdomains_found:
         ip_addr = get_addr(_to_hostname(subdomain))
         if ip_addr:
-            cp(f"\n[+] IP address found on {subdomain}: {ip_addr}", "green")
+            print(f"\n{Y}[+] {C}IP address found on {G}{hostname}: {R}{ip_addr}")
 
             ssl_info = get_certificate_info(_to_hostname(subdomain))
             if ssl_info:
-                cp("[+] SSL certificate information:", "green")
+                print(f"{R}   [+] {C}SSL certificate information:")
                 for k,v in ssl_info.items():
-                    print(f"{k}: {v}")
+                    print(f"{R}     \u2514\u27A4 {C}{k}: {W}{v}")
 
-def read_config() -> str:
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "config.toml")) as file:
-        conf = toml.load(file)
 
-    return conf['api_key']['security_trails']
 
-def securitytrails_ip_history(hostname: str = None) -> None:
-    api_key = read_config()
+def get_securitytrails_ip_history(hostname: str) -> None:
+    api_key = config.recover_api_key()
+
+    if not api_key:
+        print(f"\n{Y}[*] SecurityTrails API key not found. Skipping...")
+        return
 
     url = f"https://api.securitytrails.com/v1/history/{hostname}/dns/a"
     headers = {
@@ -128,22 +127,23 @@ def securitytrails_ip_history(hostname: str = None) -> None:
     try:
         response = requests.get(url, headers=headers)
         data = response.json()
-        cp(f"\n[+] Historical IP Address Info from SecurityTrails for {hostname}", "green")
+        print(f"\n{G}[+] {Y}Historical IP Address Info from {C}SecurityTrails{Y} for {G}{hostname}:{W}")
         for record in data.get('records', []):
             ip_addr = record.get("values", [{}])[0].get("ip", "N/A")
             first_seen = record.get("first_seen", "N/A")
             last_seen = record.get("last_seen", "N/A")
             organizations = record.get("organizations", ["N/A"])[0]
-            cp(f"\n[+] IP Address: {ip_addr}", "green")
-            cp(f" \u2514\u27A4 First Seen: {first_seen}","green")
-            cp(f" \u2514\u27A4 Last Seen: {last_seen}", "green")
-            cp(f" \u2514\u27A4 Organizations: {organizations}", "green")
+
+            print(f"\n{R} [+] {C}IP Address: {R}{ip_addr}{W}")
+            print(f"{Y}  \u2514\u27A4 {C}First Seen: {G}{first_seen}{W}")
+            print(f"{Y}  \u2514\u27A4 {C}Last Seen: {G}{last_seen}{W}")
+            print(f"{Y}  \u2514\u27A4 {C}Organizations: {G}{organizations}{W}")
     except Exception as e:
-        cp(f"[!] Error extracting Historical IP Address information from SecurityTrails: {e}", "red")
+        print(f"\n{R}[!] Error extracting Historical IP Address information from SecurityTrails")
 
-    return None
+    return
 
-def viewdns_ip_history(hostname: str = None) -> None:
+def get_viewdns_ip_history(hostname: str) -> None:
     try:
         url = f"https://viewdns.info/iphistory/?domain={hostname}"
         headers = {
@@ -155,21 +155,22 @@ def viewdns_ip_history(hostname: str = None) -> None:
         table = soup.find('table', {'border': '1'})
 
         if table:
-            cp(f"\n[+] Historical IP Address Info from Viewdns for {hostname}", "green")
+            print(f"\n{G}[+] {Y}Historical IP Address Info from {C}ViewDNS{Y} for {G}{hostname}:{W}")
             for row in table.find_all('tr')[2:]:
                 columns = row.find_all('td')
                 ip_addr = columns[0].text.strip()
                 location = columns[1].text.strip()
                 owner = columns[2].text.strip()
                 last_seen = columns[3].text.strip()
-                cp(f"\n[+] IP Address: {ip_addr}", "green")
-                cp(f" \u2514\u27A4 Location: {location}", "green")
-                cp(f" \u2514\u27A4 Owner: {owner}", "green")
-                cp(f" \u2514\u27A4 Last Seen: {last_seen}", "green")
-        else:
-            print(f"\n[-] No IP found on ViewDNS")
-    except Exception as e:
-        print(f"[!] Error extracting IP history: {e}")
 
-    return None
+                print(f"\n{R}[+] {C}IP Address: {R}{ip_addr}{W}")
+                print(f"{Y} \u2514\u27A4 {C}Location: {G}{location}{W}")
+                print(f"{Y} \u2514\u27A4 {C}Owner: {G}{owner}{W}")
+                print(f"{Y} \u2514\u27A4 {C}Last Seen: {G}{last_seen}{W}")
+        else:
+            print(f"\n{R}[+] {C}No IP found on ViewDNS")
+    except:
+        print(f"\n{R}[!] Error extracting Historical IP Address information from ViewDNS{W}")
+
+    return
 
